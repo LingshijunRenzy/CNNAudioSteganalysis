@@ -1,0 +1,6 @@
+docs/
+outputs/
+data/
+.vscode/
+.venv/
+.idea/
