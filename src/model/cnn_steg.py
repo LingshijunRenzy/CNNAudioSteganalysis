@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -5,7 +7,7 @@ import torch.nn.functional as F
 class CNNStegAnalysis(nn.Module):
     # TODO: 优化模型结构，当前结构仅为示例
 
-    def __init__(self, input_channels=1):
+    def __init__(self, input_channels=3):
         super(CNNStegAnalysis, self).__init__()
         
         # 第一个卷积块
