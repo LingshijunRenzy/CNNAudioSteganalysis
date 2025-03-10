@@ -1,0 +1,32 @@
+# 数据相关配置
+data:
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
+  shuffle_buffer: 1000
+
+# 模型相关配置
+model:
+  input_channels: 1
+  conv_channels: [16, 32, 64, 128]
+  dropout_rate: 0.5
+  fc_units: [128, 64]
+
+# 音频处理相关配置
+audio:
+  sample_rate: 44100
+  duration: 10  # 音频片段长度(秒)
+  hop_length: 512
+  n_mels: 128
+  n_fft: 2048
+  normalize:
+    mean: -27.51
+    std: 16.59
+
+# 训练相关配置
+training:
+  early_stopping_patience: 10
+  save_best_only: true
+  tensorboard_enabled: true
+  model_checkpoint_dir: "outputs"
+  tensorboard_log_dir: "logs" 
