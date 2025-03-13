@@ -27,8 +27,16 @@
 
 - Python 3.8+
 - PyTorch==2.6.0
-- CUDA 12.6
+- CUDA==12.6
+- FFmpeg==7.1.1
 - 其他依赖见 requirements.txt
+
+## 虚拟环境
+
+建议使用conda创建专用虚拟环境（非必须）：
+```bash
+conda env create -f environment.yml
+```
 
 ## 安装
 

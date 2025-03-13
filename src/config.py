@@ -76,7 +76,7 @@ DATA_CONFIG = {
 
 # 模型相关配置
 MODEL_CONFIG = {
-    'input_channels': 3,
+    'input_channels': 1,
     'input_shape': (None, None, 1),  # 音频输入形状
     'num_classes': 2,  # 二分类问题
     'learning_rate': 0.001,

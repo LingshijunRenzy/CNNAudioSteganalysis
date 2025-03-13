@@ -6,7 +6,9 @@ import numpy as np
 import librosa
 from torch.utils.data import Dataset, DataLoader
 import os
+import io
 from src.spectrogram_processing import SPM
+import ffmpeg
 
 class AudioNormalize(torch.nn.Module):
     def __init__(self, mean, std):
@@ -30,7 +32,9 @@ class AudioStegDataset(Dataset):
         self.samples = []
         
         # 遍历数据目录
-        for label in ['cover', 'lsbee_0.1']:  # cover: 原始音频, stego: 隐写音频
+        for label in ['cover', 'lsbee_0.1', 'lsbee_0.2', 'lsbee_0.3', 'lsbee_0.5', 'lsbee_1.0',
+                      'min_0.1', 'min_0.2', 'min_0.3', 'min_0.5', 'min_1.0', 
+                      'sign_0.1', 'sign_0.2', 'sign_0.3', 'sign_0.5', 'sign_1.0']:  # cover: 原始音频, stego: 隐写音频
             label_dir = os.path.join(data_dir, label)
             if os.path.exists(label_dir):
                 for audio_file in os.listdir(label_dir):
@@ -47,17 +51,89 @@ class AudioStegDataset(Dataset):
         sample = self.samples[idx]
         
         # 加载音频
-        waveform, sample_rate = torchaudio.load(sample['path'])
+        original, original_sr = torchaudio.load(sample['path'])
+        original = self._resample_if_needed(original, original_sr)
+
+        calibration = self.generate_calibration_stream(
+            sample['path'],
+            target_bitrate='1024k',
+            target_profile='aac_he_v2'
+        )
 
         spm = SPM()
         
         # 频谱图转化
-        mel_spectrogram = spm.process(waveform, sample_rate)
+        o_spectrogram = spm.process(original)
+        c_spectrogram = spm.process(calibration)
         
-        if self.transform:
-            mel_spectrogram = self.transform(mel_spectrogram)
+        return o_spectrogram, c_spectrogram, sample['label']
+    
+    def _resample_if_needed(self, waveform, original_rate):
+        """统一采样率至目标值"""
+        if original_rate != self.target_sample_rate:
+            resampler = torchaudio.transforms.Resample(
+                orig_freq=original_rate,
+                new_freq=self.target_sample_rate
+            )
+            waveform = resampler(waveform)
+        return waveform
+    
+
+    def generate_calibration_stream(self, input_path, target_bitrate='128k', target_profile='aac_lc'):
+        """
+        使用FFmpeg生成校准流音频
         
-        return mel_spectrogram, sample['label']
+        处理流程:
+        原始音频 → 解码PCM → AAC重压缩 → 解码为校准流PCM → 返回Tensor
+        
+        Args:
+            input_path: 输入音频路径
+            target_bitrate: 目标码率 (如128k)
+            target_profile: AAC Profile (如aac_lc)
+            
+        Returns:
+            torch.Tensor: 校准流波形 [channels, samples]
+        """
+        try:
+            # Step1: 解码原始音频并重压缩为AAC
+            aac_data, _ = (
+                ffmpeg
+                .input(input_path)
+                .output(
+                    'pipe:', 
+                    format='adts',
+                    acodec='aac',
+                    ar=str(self.target_sample_rate),
+                    audio_bitrate=target_bitrate,
+                    profile=target_profile,
+                    cutoff=18000,  # 限制高频带宽避免自动调整
+                    ac=1,          # 强制单声道简化处理
+                    af="pan=mono|c0=c0"
+                )
+                .run(capture_stdout=True, capture_stderr=True, quiet=True)
+            )
+            
+            # Step2: 将AAC数据解码回PCM
+            wav_data, _ = (
+                ffmpeg
+                .input('pipe:', format='adts')
+                .output(
+                    'pipe:',
+                    format='wav',
+                    acodec='pcm_s16le',
+                    ar=str(self.target_sample_rate)
+                )
+                .run(input=aac_data, capture_stdout=True, capture_stderr=True, quiet=True)
+            )
+            
+            # 加载WAV字节流为Tensor
+            buffer = io.BytesIO(wav_data)
+            waveform, sample_rate = torchaudio.load(buffer)
+            return waveform
+            
+        except ffmpeg.Error as e:
+            print(f"[FFmpeg Error] {e.stderr.decode('utf8')}")
+            raise RuntimeError(f"校准流生成失败: {input_path}")
 
 def get_dataloaders(data_dir, batch_size=32, num_workers=4):
     """
