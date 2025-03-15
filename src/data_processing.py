@@ -135,32 +135,30 @@ class AudioStegDataset(Dataset):
             print(f"[FFmpeg Error] {e.stderr.decode('utf8')}")
             raise RuntimeError(f"校准流生成失败: {input_path}")
 
-def get_dataloaders(data_dir, batch_size=32, num_workers=4):
+def get_dataloaders(data_dir, batch_size, num_workers):
     """
-    创建数据加载器
+    获取训练和验证数据加载器
     Args:
-        data_dir (str): 数据目录路径
-        batch_size (int): 批次大小
-        num_workers (int): 数据加载线程数
+        data_dir: 数据目录路径
+        batch_size: 批次大小
+        num_workers: 数据加载线程数
     Returns:
-        train_loader, val_loader: 训练集和验证集的数据加载器
+        train_loader, val_loader: 训练和验证数据加载器
     """
-    # 数据标准化转换
+    # 检查数据目录是否存在
+    if not os.path.exists(data_dir):
+        raise ValueError(f"数据目录 {data_dir} 不存在，请检查路径是否正确。")
+    
+    # 加载数据集
+    train_dataset = ...  # 确保正确加载训练数据集
+    val_dataset = ...    # 确保正确加载验证数据集
 
-    transform = torch.nn.Sequential(
-        AudioNormalize(mean=-27.51, std=16.59)
-    )
-    
-    # 创建数据集
-    full_dataset = AudioStegDataset(data_dir, transform=transform)
-    
-    # 划分训练集和验证集
-    train_size = int(0.8 * len(full_dataset))
-    val_size = len(full_dataset) - train_size
-    train_dataset, val_dataset = torch.utils.data.random_split(
-        full_dataset, [train_size, val_size]
-    )
-    
+    # 检查数据集是否为空
+    if len(train_dataset) == 0:
+        raise ValueError("训练数据集为空，请检查数据目录或数据加载逻辑。")
+    if len(val_dataset) == 0:
+        raise ValueError("验证数据集为空，请检查数据目录或数据加载逻辑。")
+
     # 创建数据加载器
     train_loader = DataLoader(
         train_dataset,
@@ -168,7 +166,6 @@ def get_dataloaders(data_dir, batch_size=32, num_workers=4):
         shuffle=True,
         num_workers=num_workers
     )
-    
     val_loader = DataLoader(
         val_dataset,
         batch_size=batch_size,

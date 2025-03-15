@@ -121,7 +121,6 @@ def main():
     
     cfg.initialize(config_path=args.config)
     
-
     # 将命令行参数添加到配置中
     runtime_config = {
         'data_dir': args.data_dir,
@@ -177,5 +176,6 @@ def main():
 
 if __name__ == '__main__':
     main()
+    print(f"数据目录: {args.data_dir}")  # 打印数据目录路径
 
 
