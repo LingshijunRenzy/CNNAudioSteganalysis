@@ -57,10 +57,14 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
         
         train_bar = tqdm(train_loader, desc=f'Epoch {epoch+1}/{num_epochs} [Train]')
         for inputs, labels in train_bar:
-            inputs, labels = inputs.to(device), labels.to(device)
+            # change train input to fit DPES
+            o_spectrograms, c_spectrograms = inputs
+            o_spectrograms = o_spectrograms.to(device)
+            c_spectrograms = c_spectrograms.to(device)
+            labels = labels.to(device)
             
             optimizer.zero_grad()
-            outputs = model(inputs)
+            outputs = model((o_spectrograms, c_spectrograms))
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()

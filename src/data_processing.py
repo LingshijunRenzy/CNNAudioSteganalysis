@@ -15,6 +15,7 @@ class AudioNormalize(torch.nn.Module):
         super().__init__()
         self.mean = mean
         self.std = std
+        self.target_sample_rate = 44100  # 目标采样率
 
     def forward(self, x):
         return (x - self.mean) / self.std
@@ -66,7 +67,7 @@ class AudioStegDataset(Dataset):
         o_spectrogram = spm.process(original)
         c_spectrogram = spm.process(calibration)
         
-        return o_spectrogram, c_spectrogram, sample['label']
+        return (o_spectrogram, c_spectrogram), torch.tensor(sample['label'], dtype=torch.long)
     
     def _resample_if_needed(self, waveform, original_rate):
         """统一采样率至目标值"""
@@ -149,9 +150,17 @@ def get_dataloaders(data_dir, batch_size, num_workers):
     if not os.path.exists(data_dir):
         raise ValueError(f"数据目录 {data_dir} 不存在，请检查路径是否正确。")
     
+    full_dataset = AudioStegDataset(data_dir=data_dir)
+
+    # 划分数据集
+    dataset_size = len(full_dataset)
+    train_size = int(dataset_size * 0.8)
+    val_size = dataset_size - train_size
+    
     # 加载数据集
-    train_dataset = ...  # 确保正确加载训练数据集
-    val_dataset = ...    # 确保正确加载验证数据集
+    train_dataset, val_dataset = torch.utils.data.random_split(
+        full_dataset, [train_size, val_size]
+    )
 
     # 检查数据集是否为空
     if len(train_dataset) == 0:
