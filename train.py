@@ -48,6 +48,10 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
     """
     best_val_acc = 0.0
     
+    # 收集特征和标签用于训练 SVM
+    train_features = []
+    train_labels = []
+    
     for epoch in range(num_epochs):
         # 训练阶段
         model.train()
@@ -78,6 +82,10 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
                 'loss': train_loss/train_total,
                 'acc': 100.*train_correct/train_total
             })
+            
+            # 收集特征和标签
+            train_features.append(outputs.cpu().detach().numpy())
+            train_labels.append(labels.cpu().detach().numpy())
         
         # 验证阶段
         model.eval()
@@ -88,9 +96,12 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
         with torch.no_grad():
             val_bar = tqdm(val_loader, desc=f'Epoch {epoch+1}/{num_epochs} [Val]')
             for inputs, labels in val_bar:
-                inputs, labels = inputs.to(device), labels.to(device)
+                o_spectrograms, c_spectrograms = inputs
+                o_spectrograms = o_spectrograms.to(device)
+                c_spectrograms = c_spectrograms.to(device)
+                labels = labels.to(device)
                 
-                outputs = model(inputs)
+                outputs = model((o_spectrograms, c_spectrograms))
                 loss = criterion(outputs, labels)
                 
                 val_loss += loss.item()
@@ -112,6 +123,13 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
         print(f'Epoch {epoch+1}/{num_epochs}:')
         print(f'Train Loss: {train_loss/train_total:.4f}, Train Acc: {100.*train_correct/train_total:.2f}%')
         print(f'Val Loss: {val_loss/val_total:.4f}, Val Acc: {100.*val_correct/val_total:.2f}%')
+    
+    # 训练 SVM 分类器
+    train_features = np.concatenate(train_features, axis=0)
+    train_labels = np.concatenate(train_labels, axis=0)
+    model.scaler.fit(train_features)
+    train_features = model.scaler.transform(train_features)
+    model.svm.fit(train_features, train_labels)
 
 def main():
     parser = argparse.ArgumentParser(description='音频隐写分析模型训练')
