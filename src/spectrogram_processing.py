@@ -21,9 +21,12 @@ class SPM:
         # 使用汉明窗
         # 计算复数频谱
         
-        complex_spec = torch.stft(waveform, n_fft=frame_length, hop_length=hop_length,
-                         win_length=frame_length, window=torch.hamming_window(frame_length),
-                         return_complex=True)
+        complex_spec = torch.stft(waveform,
+                                  n_fft=frame_length,               
+                                  hop_length=hop_length,
+                                  win_length=frame_length, 
+                                  window=torch.hamming_window(frame_length),
+                                  return_complex=True)
         
         # 计算对数幅度谱: 20*log10(abs(fft))
         log_magnitude_spec = 20 * torch.log10(torch.abs(complex_spec) + 1e-10)  # 添加小值避免log(0)

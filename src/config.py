@@ -40,7 +40,9 @@ class ConfigManager:
         """更新嵌套字典"""
         for k, v in u.items():
             if isinstance(v, dict):
-                d[k] = self._update_nested_dict(d.get(k, {}), v)
+                if k not in d:
+                    d[k] = {}
+                d[k] = self._update_nested_dict(d[k], v)
             else:
                 d[k] = v
         return d
@@ -67,27 +69,24 @@ ROOT_DIR = Path(__file__).parent.parent.absolute()
 # 数据相关配置
 DATA_CONFIG = {
     'data_dir': os.path.join(ROOT_DIR, 'data'),
-    'train_ratio': 0.8,
-    'val_ratio': 0.1,
-    'test_ratio': 0.1,
-    'batch_size': 32,
-    'shuffle_buffer': 1000,
+    'cover_dir_name': 'cover', # cover音频目录名称
+    'train_ratio': 0.8, # 训练集占完整数据集的比例
+    'batch_size': 32,   # 批次大小
+    'shuffle_buffer': 1000, # 数据加载缓冲区大小
+    'num_workers': 4,   # 数据加载线程数
+    'max_samples': None,  # 最大样本数
 }
 
 # 模型相关配置
 MODEL_CONFIG = {
     'input_channels': 1,
     'input_shape': (None, None, 1),  # 音频输入形状
-    'num_classes': 2,  # 二分类问题
     'learning_rate': 0.001,
-    'optimizer': 'adam',
-    'loss': 'binary_crossentropy',
-    'metrics': ['accuracy'],
 }
 
 # 训练相关配置
 TRAIN_CONFIG = {
-    'epochs': 100,
+    'num_epochs': 20,
     'early_stopping_patience': 10,
     'model_checkpoint_dir': os.path.join(ROOT_DIR, 'models'),
     'tensorboard_log_dir': os.path.join(ROOT_DIR, 'logs'),
@@ -95,11 +94,12 @@ TRAIN_CONFIG = {
 
 # 音频处理相关配置
 AUDIO_CONFIG = {
-    'sample_rate': 44100,
-    'duration': 10,  # 音频片段长度(秒)
-    'hop_length': 512,
-    'n_mels': 128,
-    'n_fft': 2048,
+    'sample_rate': 32000,
+    'duration': 2,  # 音频片段长度(秒)
+    'frame_length': 1024,
+    'hop_percentage': 0.5,
+    'target_bitrate': '1024k',
+    'target_profile': 'aac_he_v2'
 }
 
 def load_config(config_path):

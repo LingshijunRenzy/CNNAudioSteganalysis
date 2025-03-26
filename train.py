@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -29,10 +29,9 @@ def print_config(config):
 def confirm_config():
     """获取用户确认"""
     while True:
-        response = input("\n请确认以上配置是否正确 (Y/N): ").lower()
+        response = input("\nstart train with this config? (Y/N): ").lower()
         if response in ['y', 'n']:
             return response == 'y'
-        print("无效输入，请输入 Y 或 N")
 
 def train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs, device):
     """
@@ -86,6 +85,9 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
             # 收集特征和标签
             train_features.append(outputs.cpu().detach().numpy())
             train_labels.append(labels.cpu().detach().numpy())
+
+            if train_bar.n % 100 == 0:
+                torch.cuda.empty_cache()
         
         # 验证阶段
         model.eval()
@@ -138,18 +140,26 @@ def main():
     parser.add_argument('--num_epochs', type=int, default=50, help='训练轮数')
     parser.add_argument('--lr', type=float, default=0.001, help='学习率')
     parser.add_argument('--num_workers', type=int, default=4, help='数据加载线程数')
-    parser.add_argument('--config', type=str, default='configs/default.yaml', help='配置文件路径')
+    parser.add_argument('--max_samples', type=int, default=None, help='最大样本数')
+    parser.add_argument('--config', type=str, help='配置文件路径')
     args = parser.parse_args()
     
     cfg.initialize(config_path=args.config)
     
     # 将命令行参数添加到配置中
     runtime_config = {
-        'data_dir': args.data_dir,
-        'batch_size': args.batch_size,
-        'num_epochs': args.num_epochs,
-        'learning_rate': args.lr,
-        'num_workers': args.num_workers
+        'DATA_CONFIG': {
+            'data_dir': args.data_dir,
+            'batch_size': args.batch_size,
+            'num_workers': args.num_workers,
+            'max_samples': args.max_samples
+        },
+        'MODEL_CONFIG': {
+            'learning_rate': args.lr
+        },
+        'TRAIN_CONFIG': {
+            'num_epochs': args.num_epochs
+        }
     }
 
     cfg._update_nested_dict(cfg._config, runtime_config)
@@ -171,9 +181,9 @@ def main():
     
     # 获取数据加载器
     train_loader, val_loader = get_dataloaders(
-        args.data_dir,
-        args.batch_size,
-        args.num_workers
+        config['DATA_CONFIG']['data_dir'],
+        config['DATA_CONFIG']['batch_size'],
+        config['DATA_CONFIG']['num_workers']
     )
     
     # 创建模型
@@ -183,7 +193,7 @@ def main():
     
     # 定义损失函数和优化器
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = optim.Adam(model.parameters(), lr=config['MODEL_CONFIG']['learning_rate'])
     
     # 训练模型
     train_model(
@@ -192,12 +202,11 @@ def main():
         val_loader,
         criterion,
         optimizer,
-        args.num_epochs,
+        config['TRAIN_CONFIG']['num_epochs'],
         device
     )
 
 if __name__ == '__main__':
     main()
-    print(f"数据目录: {args.data_dir}")  # 打印数据目录路径
 
 

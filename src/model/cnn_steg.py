@@ -23,7 +23,7 @@ class ResidualUnit(nn.Module):
         out = self.relu(out)
         out = self.conv2(out)
         out = self.bn2(out)
-        out = out - identity  # H(x) = F(x) - x
+        out = out + identity  # H(x) = F(x) + x
         out = self.relu(out)
         return out
 
@@ -56,7 +56,7 @@ class DPES(nn.Module):
         return enhanced_features
 
 class CNNStegAnalysis(nn.Module):
-    def __init__(self, input_channels=3):
+    def __init__(self, input_channels=1):
         super(CNNStegAnalysis, self).__init__()
         
         # 初始卷积层
@@ -67,13 +67,13 @@ class CNNStegAnalysis(nn.Module):
         )
         
         # 卷积层 A 32通道，5个残差单元
-        self.convA = self._make_group(32, 5)
+        self.convA = self._make_group(32, 32, 5)
         
         # 卷积层 B 64通道，5个残差单元
-        self.convB = self._make_group(64, 5)
+        self.convB = self._make_group(32, 64, 5)
         
         # 卷积层 C 128通道，5个残差单元
-        self.convC = self._make_group(128, 5)
+        self.convC = self._make_group(64, 128, 5)
         
         # 双流金字塔增强模块
         self.dpes = DPES(128)
@@ -83,11 +83,28 @@ class CNNStegAnalysis(nn.Module):
         
         # SVM 分类器
         self.svm = svm.SVC(probability=True)
+
+        self.fc = nn.Sequential(
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Linear(64, 2)
+        )
     
-    def _make_group(self, channels, num_units):
+    def _make_group(self, in_channels, out_channels, num_units):
         """创建卷积组，包含多个残差单元和一次平均池化"""
-        layers = [ResidualUnit(channels) for _ in range(num_units)]
-        layers.append(nn.AvgPool2d(kernel_size=3, stride=2))  # 平均池化层
+        layers = []
+
+        # 转换通道数
+        layers.append(nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1))
+        layers.append(nn.BatchNorm2d(out_channels))
+        layers.append(nn.ReLU())
+
+        # 添加残差单元
+        for _ in range(num_units):
+            layers.append(ResidualUnit(out_channels))
+        
+        layers.append(nn.AvgPool2d(kernel_size=2, stride=2, padding=0))  # 平均池化层
         return nn.Sequential(*layers)
     
     def forward(self, inputs):
@@ -112,13 +129,17 @@ class CNNStegAnalysis(nn.Module):
         # 双流金字塔增强模块
         enhanced_features = self.dpes(o_spectrogram, c_spectrogram)
         
-        # 展平
-        x = enhanced_features.view(enhanced_features.size(0), -1)
+        # # 展平
+        # x = enhanced_features.view(enhanced_features.size(0), -1)
         
-        # 特征标准化
-        x = self.scaler.transform(x.cpu().detach().numpy())
+        # # 特征标准化
+        # x = self.scaler.transform(x.cpu().detach().numpy())
         
-        # SVM 分类
-        x = self.svm.predict_proba(x)
+        # # SVM 分类
+        # x = self.svm.predict_proba(x)
         
-        return torch.tensor(x, dtype=torch.float32).to(inputs[0].device)
+        # return torch.tensor(x, dtype=torch.float32).to(inputs[0].device)
+    
+        # 标准全连接层
+        logits = self.fc(enhanced_features)
+        return logits

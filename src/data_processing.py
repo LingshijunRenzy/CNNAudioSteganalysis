@@ -8,6 +8,7 @@ from torch.utils.data import Dataset, DataLoader
 import os
 import io
 from src.spectrogram_processing import SPM
+from src.config import config as cfg
 import ffmpeg
 
 class AudioNormalize(torch.nn.Module):
@@ -15,7 +16,6 @@ class AudioNormalize(torch.nn.Module):
         super().__init__()
         self.mean = mean
         self.std = std
-        self.target_sample_rate = 44100  # 目标采样率
 
     def forward(self, x):
         return (x - self.mean) / self.std
@@ -31,19 +31,33 @@ class AudioStegDataset(Dataset):
         self.data_dir = data_dir
         self.transform = transform
         self.samples = []
+        self.AUDIO_CONFIG = cfg.get(key='AUDIO_CONFIG')
+        self.DATA_CONFIG = cfg.get(key='DATA_CONFIG')
+
+        # 获取所有子目录
+        subdirs = [d for d in os.listdir(data_dir)
+                   if os.path.isdir(os.path.join(data_dir, d))]
+        
+        if not subdirs:
+            raise ValueError(f"could not find any subdirectories in {data_dir}")
+
+        print(f"Found {len(subdirs)} subdirectories in {data_dir}")
         
         # 遍历数据目录
-        for label in ['cover', 'lsbee_0.1', 'lsbee_0.2', 'lsbee_0.3', 'lsbee_0.5', 'lsbee_1.0',
-                      'min_0.1', 'min_0.2', 'min_0.3', 'min_0.5', 'min_1.0', 
-                      'sign_0.1', 'sign_0.2', 'sign_0.3', 'sign_0.5', 'sign_1.0']:  # cover: 原始音频, stego: 隐写音频
-            label_dir = os.path.join(data_dir, label)
-            if os.path.exists(label_dir):
-                for audio_file in os.listdir(label_dir):
-                    if audio_file.endswith(('.wav', '.mp3')):
-                        self.samples.append({
-                            'path': os.path.join(label_dir, audio_file),
-                            'label': 0 if label == 'cover' else 1
-                        })
+        for subdir in subdirs:
+            subdir_path = os.path.join(data_dir, subdir)
+            is_cover = (subdir.lower() == self.DATA_CONFIG['cover_dir_name'].lower())
+            label = 0 if is_cover else 1
+
+            for audio_file in os.listdir(subdir_path):
+                if audio_file.endswith(('.wav', '.mp3', '.flac', '.ogg', '.aac')):
+                    self.samples.append({
+                        'path': os.path.join(subdir_path, audio_file),
+                        'label': label,
+                        'stego_method': subdir if not is_cover else None
+                    })
+
+        print(f"Found {len(self.samples)} audio files in {data_dir}")
     
     def __len__(self):
         return len(self.samples)
@@ -57,24 +71,28 @@ class AudioStegDataset(Dataset):
 
         calibration = self.generate_calibration_stream(
             sample['path'],
-            target_bitrate='1024k',
-            target_profile='aac_he_v2'
+            target_bitrate=self.AUDIO_CONFIG['target_bitrate'],
+            target_profile=self.AUDIO_CONFIG['target_profile'],
         )
 
         spm = SPM()
         
         # 频谱图转化
-        o_spectrogram = spm.process(original)
-        c_spectrogram = spm.process(calibration)
+        o_spectrogram = spm.process(original,
+                                    frame_length=self.AUDIO_CONFIG['frame_length'],
+                                    hop_percentage=self.AUDIO_CONFIG['hop_percentage'])
+        c_spectrogram = spm.process(calibration,
+                                    frame_length=self.AUDIO_CONFIG['frame_length'],
+                                    hop_percentage=self.AUDIO_CONFIG['hop_percentage'])
         
         return (o_spectrogram, c_spectrogram), torch.tensor(sample['label'], dtype=torch.long)
     
     def _resample_if_needed(self, waveform, original_rate):
         """统一采样率至目标值"""
-        if original_rate != self.target_sample_rate:
+        if original_rate != self.AUDIO_CONFIG['sample_rate']:
             resampler = torchaudio.transforms.Resample(
                 orig_freq=original_rate,
-                new_freq=self.target_sample_rate
+                new_freq=self.AUDIO_CONFIG['sample_rate']
             )
             waveform = resampler(waveform)
         return waveform
@@ -96,35 +114,63 @@ class AudioStegDataset(Dataset):
             torch.Tensor: 校准流波形 [channels, samples]
         """
         try:
-            # Step1: 解码原始音频并重压缩为AAC
-            aac_data, _ = (
+            # # Step1: 解码原始音频并重压缩为AAC
+            # aac_data, _ = (
+            #     ffmpeg
+            #     .input(input_path)
+            #     .output(
+            #         'pipe:', 
+            #         format='adts',
+            #         acodec='aac',
+            #         ar=str(self.AUDIO_CONFIG['sample_rate']),
+            #         audio_bitrate=target_bitrate,
+            #         profile=target_profile,
+            #         cutoff=18000,  # 限制高频带宽避免自动调整
+            #         ac=1,          # 强制单声道简化处理
+            #         af="pan=mono|c0=c0"
+            #     )
+            #     .run(capture_stdout=True, capture_stderr=True, quiet=True)
+            # )
+
+            # print("第一步编码成功，开始第二步解码...")
+            
+            # # Step2: 将AAC数据解码回PCM
+            # wav_data, _ = (
+            #     ffmpeg
+            #     .input('pipe:', format='adts')
+            #     .output(
+            #         'pipe:',
+            #         format='wav',
+            #         acodec='pcm_s16le',
+            #         ar=str(self.AUDIO_CONFIG['sample_rate']),
+            #         ac=1,
+            #     )
+            #     .run(input=aac_data, capture_stdout=True, capture_stderr=True, quiet=True)
+            # )
+
+            # 提取码率数字部分，用于调整滤波强度
+            bitrate_value = int(''.join(filter(str.isdigit, target_bitrate)))
+            
+            # 根据码率调整低通滤波器频率，模拟不同码率的压缩效果
+            # 低码率有更强的低通滤波效果
+            max_freq = min(20000, 10000 + (bitrate_value // 32) * 500)
+            
+            # 单步处理：直接从输入音频到WAV，应用滤波器模拟压缩/解压缩效果
+            wav_data, _ = (
                 ffmpeg
                 .input(input_path)
                 .output(
-                    'pipe:', 
-                    format='adts',
-                    acodec='aac',
-                    ar=str(self.target_sample_rate),
-                    audio_bitrate=target_bitrate,
-                    profile=target_profile,
-                    cutoff=18000,  # 限制高频带宽避免自动调整
-                    ac=1,          # 强制单声道简化处理
-                    af="pan=mono|c0=c0"
+                    'pipe:',
+                    format='wav',  # 使用wav格式而不是adts
+                    acodec='pcm_s16le',
+                    ar=str(self.AUDIO_CONFIG['sample_rate']),
+                    ac=1,  # 强制单声道
+                    # 应用滤波器链模拟压缩/解压缩的质量损失
+                    af=f"aresample={self.AUDIO_CONFIG['sample_rate']},"\
+                    f"highpass=f=20,lowpass=f={max_freq},"\
+                    f"acompressor=threshold=0.05:ratio=4:attack=5:release=50"  # 添加压缩器模拟动态范围压缩
                 )
                 .run(capture_stdout=True, capture_stderr=True, quiet=True)
-            )
-            
-            # Step2: 将AAC数据解码回PCM
-            wav_data, _ = (
-                ffmpeg
-                .input('pipe:', format='adts')
-                .output(
-                    'pipe:',
-                    format='wav',
-                    acodec='pcm_s16le',
-                    ar=str(self.target_sample_rate)
-                )
-                .run(input=aac_data, capture_stdout=True, capture_stderr=True, quiet=True)
             )
             
             # 加载WAV字节流为Tensor
@@ -133,7 +179,13 @@ class AudioStegDataset(Dataset):
             return waveform
             
         except ffmpeg.Error as e:
-            print(f"[FFmpeg Error] {e.stderr.decode('utf8')}")
+            print(f"[FFmpeg Error] 命令执行失败:")
+            print(f"标准错误输出: {e.stderr.decode('utf8')}")
+            
+            # 打印详细的命令信息
+            if hasattr(e, 'cmd'):
+                print(f"执行的命令: {' '.join(e.cmd)}")
+            
             raise RuntimeError(f"校准流生成失败: {input_path}")
 
 def get_dataloaders(data_dir, batch_size, num_workers):
@@ -150,16 +202,23 @@ def get_dataloaders(data_dir, batch_size, num_workers):
     if not os.path.exists(data_dir):
         raise ValueError(f"数据目录 {data_dir} 不存在，请检查路径是否正确。")
     
-    full_dataset = AudioStegDataset(data_dir=data_dir)
+    dataset = AudioStegDataset(data_dir=data_dir)
 
+    DATA_CONFIG = cfg.get(key='DATA_CONFIG')
+
+    max_samples = DATA_CONFIG['max_samples']
+    if max_samples and max_samples < len(dataset):
+        indices = torch.randperm(len(dataset))[:max_samples]
+        dataset = torch.utils.data.Subset(dataset, indices)
+    
     # 划分数据集
-    dataset_size = len(full_dataset)
-    train_size = int(dataset_size * 0.8)
+    dataset_size = len(dataset)
+    train_size = int(dataset_size * DATA_CONFIG['train_ratio'])
     val_size = dataset_size - train_size
     
     # 加载数据集
     train_dataset, val_dataset = torch.utils.data.random_split(
-        full_dataset, [train_size, val_size]
+        dataset, [train_size, val_size]
     )
 
     # 检查数据集是否为空
@@ -173,7 +232,7 @@ def get_dataloaders(data_dir, batch_size, num_workers):
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=num_workers
+        num_workers=num_workers,
     )
     val_loader = DataLoader(
         val_dataset,
