@@ -235,3 +235,19 @@ class StegoMethodTracker:
             plt.tight_layout()
             plt.savefig(save_path.replace('.png', '_cumulative.png'), dpi=300)
             print(f"Cumulative accuracy chart for different steganography methods saved to {save_path.replace('.png', '_cumulative.png')}")
+    
+    def reset_cumulative_stats(self):
+        """每个epoch开始时重置累积统计"""
+        # 仅重置计数器而不是替换整个字典
+        self.cover_stats['correct'] = 0
+        self.cover_stats['total'] = 0
+        self.cover_stats['epoch_correct'] = 0  
+        self.cover_stats['epoch_total'] = 0
+        
+        # 为每个隐写方法重置计数器
+        for method in self.all_methods:
+            if method in self.method_stats:
+                self.method_stats[method]['correct'] = 0
+                self.method_stats[method]['total'] = 0
+                self.method_stats[method]['epoch_correct'] = 0
+                self.method_stats[method]['epoch_total'] = 0

@@ -96,7 +96,7 @@ TRAIN_CONFIG = {
 AUDIO_CONFIG = {
     'sample_rate': 16000,
     'duration': 2,  # 音频片段长度(秒)
-    'frame_length': 256,
+    'frame_length': 512,
     'hop_percentage': 0.5,
     'target_bitrate': '512k',
     'target_profile': 'aac_he_v2'

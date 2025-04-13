@@ -42,6 +42,8 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
     """
     训练模型，并单独跟踪每种隐写方法的性能
     """
+
+    print("开始训练循环...")
     best_val_acc = 0.0
     
     # 收集特征和标签用于训练 SVM
@@ -56,10 +58,16 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
 
     # 创建隐写方法跟踪器
     train_tracker = StegoMethodTracker()
-    val_tracker = StegoMethodTracker()
+    val_tracker = StegoMethodTracker() # 添加L2正则化
+
+    # 添加学习率调度器
+    scheduler = ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=5, verbose=True)
 
     
     for epoch in range(num_epochs):
+        train_tracker.reset_cumulative_stats()
+        val_tracker.reset_cumulative_stats()
+
         # 训练阶段
         model.train()
         train_loss = 0.0
@@ -79,7 +87,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
             outputs = model((o_spectrograms, c_spectrograms))
             loss = criterion(outputs, labels)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
             optimizer.step()
             
             train_loss += loss.item()
@@ -104,7 +112,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
                 train_features.append(outputs.cpu().detach().numpy())
                 train_labels.append(labels.cpu().detach().numpy())
 
-            if train_bar.n % 5 == 0:
+            if train_bar.n % 10 == 0:
                 torch.cuda.empty_cache()
         
         # 计算本轮epoch的各隐写方法准确率
@@ -120,7 +128,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
             val_bar = tqdm(val_loader, desc=f'Epoch {epoch+1}/{num_epochs} [Val]')
             for batch in val_bar:
                 # 处理包含隐写方法信息的批次数据
-                inputs, labels, stego_methods = batch if len(batch) == 3 else (batch[0], batch[1], [None] * len(batch[1]))
+                inputs, labels, stego_methods = batch
                 o_spectrograms, c_spectrograms = inputs
                 o_spectrograms = o_spectrograms.to(device)
                 c_spectrograms = c_spectrograms.to(device)
@@ -160,10 +168,11 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
             best_val_acc = val_acc
             # 保存最佳模型
             torch.save(model.state_dict(), 'outputs/best_model.pth')
+
+        # 在每个验证阶段结束后更新学习率
+        scheduler.step(val_acc)  # 使用验证集准确率作为指标
         
         print(f'Epoch {epoch+1}/{num_epochs}:')
-        current_lr = optimizer.param_groups[0]['lr']
-        print(f'Current learning rate: {optimizer.param_groups[0]["lr"]:.6f}')
         print(f'Train Loss: {train_loss/train_total:.4f}, Train Acc: {100.*train_correct/train_total:.2f}%')
         print(f'Val Loss: {val_loss/val_total:.4f}, Val Acc: {100.*val_correct/val_total:.2f}%')
         
@@ -199,9 +208,10 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
     plt.grid(True)
     
     plt.tight_layout()
-    plt.savefig('training_results.png', dpi=300)
+
     # Get current timestamp
     timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M")
+    plt.savefig(f'training_results_{timestamp}.png', dpi=300)
 
     print(f"训练结果图表已保存至 training_results_{timestamp}.png")
         
@@ -268,6 +278,7 @@ def main():
         config['DATA_CONFIG']['batch_size'],
         config['DATA_CONFIG']['num_workers']
     )
+    print("数据加载器创建完成")
     
     # 创建模型
     model = CNNStegAnalysis(
@@ -275,8 +286,17 @@ def main():
     ).to(device)
     
     # 定义损失函数和优化器
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=config['MODEL_CONFIG']['learning_rate'])
+    # criterion = nn.CrossEntropyLoss()
+    # optimizer = optim.Adam(model.parameters(), lr=config['MODEL_CONFIG']['learning_rate'])
+
+    class_weights = torch.FloatTensor([15, 1]).to(device)  # 根据经验设置适当值
+    print(f"使用预设类别权重: {class_weights}")
+
+    criterion = nn.CrossEntropyLoss(weight=class_weights)
+    optimizer = optim.Adam(model.parameters(), lr=config['MODEL_CONFIG']['learning_rate'], 
+                        weight_decay=1e-4) 
+    
+    print("模型创建完成")
     
     # 训练模型
     train_model(
