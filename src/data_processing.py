@@ -54,7 +54,7 @@ class AudioStegDataset(Dataset):
                     self.samples.append({
                         'path': os.path.join(subdir_path, audio_file),
                         'label': label,
-                        'stego_method': subdir if not is_cover else None
+                        'stego_method': subdir if not is_cover else 'cover'
                     })
 
         print(f"Found {len(self.samples)} audio files in {data_dir}")
@@ -85,7 +85,7 @@ class AudioStegDataset(Dataset):
                                     frame_length=self.AUDIO_CONFIG['frame_length'],
                                     hop_percentage=self.AUDIO_CONFIG['hop_percentage'])
         
-        return (o_spectrogram, c_spectrogram), torch.tensor(sample['label'], dtype=torch.long)
+        return (o_spectrogram, c_spectrogram), torch.tensor(sample['label'], dtype=torch.long), sample['stego_method']
     
     def _resample_if_needed(self, waveform, original_rate):
         """统一采样率至目标值"""

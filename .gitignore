@@ -7,3 +7,6 @@ data/
 .vscode/
 .venv/
 .idea/
+
+# Ignore all png images
+*.png

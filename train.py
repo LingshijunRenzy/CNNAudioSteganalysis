@@ -3,12 +3,17 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm import tqdm
 import argparse
 import os
 from src.data_processing import get_dataloaders
 from src.model.cnn_steg import CNNStegAnalysis
 from src.config import config as cfg
+import matplotlib.pyplot as plt
+
+from src.utils import StegoMethodTracker
+from datetime import datetime
 
 def print_config(config):
     """打印配置信息"""
@@ -35,21 +40,24 @@ def confirm_config():
 
 def train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs, device):
     """
-    训练模型
-    Args:
-        model: 模型实例
-        train_loader: 训练数据加载器
-        val_loader: 验证数据加载器
-        criterion: 损失函数
-        optimizer: 优化器
-        num_epochs: 训练轮数
-        device: 训练设备
+    训练模型，并单独跟踪每种隐写方法的性能
     """
     best_val_acc = 0.0
     
     # 收集特征和标签用于训练 SVM
     train_features = []
     train_labels = []
+
+    train_losses = []
+    train_accs = []
+    val_losses = []
+    val_accs = []
+    epochs = []
+
+    # 创建隐写方法跟踪器
+    train_tracker = StegoMethodTracker()
+    val_tracker = StegoMethodTracker()
+
     
     for epoch in range(num_epochs):
         # 训练阶段
@@ -59,8 +67,9 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
         train_total = 0
         
         train_bar = tqdm(train_loader, desc=f'Epoch {epoch+1}/{num_epochs} [Train]')
-        for inputs, labels in train_bar:
-            # change train input to fit DPES
+        for batch in train_bar:
+            # 处理包含隐写方法信息的批次数据
+            inputs, labels, stego_methods = batch
             o_spectrograms, c_spectrograms = inputs
             o_spectrograms = o_spectrograms.to(device)
             c_spectrograms = c_spectrograms.to(device)
@@ -70,6 +79,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
             outputs = model((o_spectrograms, c_spectrograms))
             loss = criterion(outputs, labels)
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
             
             train_loss += loss.item()
@@ -77,17 +87,28 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
             train_total += labels.size(0)
             train_correct += predicted.eq(labels).sum().item()
             
+            # 更新各隐写方法的统计信息
+            train_tracker.update(
+                predicted.cpu().numpy(), 
+                labels.cpu().numpy(), 
+                stego_methods
+            )
+            
             train_bar.set_postfix({
                 'loss': train_loss/train_total,
                 'acc': 100.*train_correct/train_total
             })
             
             # 收集特征和标签
-            train_features.append(outputs.cpu().detach().numpy())
-            train_labels.append(labels.cpu().detach().numpy())
+            if epoch == num_epochs - 1:  # 仅在最后一个epoch收集特征
+                train_features.append(outputs.cpu().detach().numpy())
+                train_labels.append(labels.cpu().detach().numpy())
 
-            if train_bar.n % 100 == 0:
+            if train_bar.n % 5 == 0:
                 torch.cuda.empty_cache()
+        
+        # 计算本轮epoch的各隐写方法准确率
+        train_tracker.compute_epoch_accuracy()
         
         # 验证阶段
         model.eval()
@@ -97,7 +118,9 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
         
         with torch.no_grad():
             val_bar = tqdm(val_loader, desc=f'Epoch {epoch+1}/{num_epochs} [Val]')
-            for inputs, labels in val_bar:
+            for batch in val_bar:
+                # 处理包含隐写方法信息的批次数据
+                inputs, labels, stego_methods = batch if len(batch) == 3 else (batch[0], batch[1], [None] * len(batch[1]))
                 o_spectrograms, c_spectrograms = inputs
                 o_spectrograms = o_spectrograms.to(device)
                 c_spectrograms = c_spectrograms.to(device)
@@ -111,10 +134,26 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
                 val_total += labels.size(0)
                 val_correct += predicted.eq(labels).sum().item()
                 
+                # 更新各隐写方法的统计信息
+                val_tracker.update(
+                    predicted.cpu().numpy(), 
+                    labels.cpu().numpy(), 
+                    stego_methods
+                )
+                
                 val_bar.set_postfix({
                     'loss': val_loss/val_total,
                     'acc': 100.*val_correct/val_total
                 })
+
+        # 计算本轮epoch的各隐写方法验证准确率
+        val_tracker.compute_epoch_accuracy()
+
+        epochs.append(epoch + 1)
+        train_losses.append(train_loss/train_total)
+        train_accs.append(100.*train_correct/train_total)
+        val_losses.append(val_loss/val_total)
+        val_accs.append(100.*val_correct/val_total)
         
         val_acc = 100.*val_correct/val_total
         if val_acc > best_val_acc:
@@ -123,8 +162,52 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
             torch.save(model.state_dict(), 'outputs/best_model.pth')
         
         print(f'Epoch {epoch+1}/{num_epochs}:')
+        current_lr = optimizer.param_groups[0]['lr']
+        print(f'Current learning rate: {optimizer.param_groups[0]["lr"]:.6f}')
         print(f'Train Loss: {train_loss/train_total:.4f}, Train Acc: {100.*train_correct/train_total:.2f}%')
         print(f'Val Loss: {val_loss/val_total:.4f}, Val Acc: {100.*val_correct/val_total:.2f}%')
+        
+        if(epoch + 1) % 5 == 0:
+            # 打印每种隐写方法的准确率
+            print("\n训练集各隐写方法准确率:")
+            train_tracker.print_stats(epoch=epoch+1, use_cumulative=True)
+            print("\n验证集各隐写方法准确率:")
+            val_tracker.print_stats(epoch=epoch+1, use_cumulative=True)
+            print("-" * 80)
+
+    # 绘制常规训练图表
+    plt.figure(figsize=(12, 5))
+    
+    # 图1: 损失曲线
+    plt.subplot(1, 2, 1)
+    plt.plot(epochs, train_losses, 'b-', label='Training Loss')
+    plt.plot(epochs, val_losses, 'r-', label='Validation Loss')
+    plt.title('Loss Curve')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.grid(True)
+    
+    # 图2: 准确率曲线
+    plt.subplot(1, 2, 2)
+    plt.plot(epochs, train_accs, 'b-', label='Training Accuracy')
+    plt.plot(epochs, val_accs, 'r-', label='Validation Accuracy')
+    plt.title('Accuracy Curve')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy (%)')
+    plt.legend()
+    plt.grid(True)
+    
+    plt.tight_layout()
+    plt.savefig('training_results.png', dpi=300)
+    # Get current timestamp
+    timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M")
+
+    print(f"训练结果图表已保存至 training_results_{timestamp}.png")
+        
+    # 绘制各隐写方法的准确率曲线
+    train_tracker.plot_accuracy_curves(f'train_stego_methods_accuracy_{timestamp}.png')
+    val_tracker.plot_accuracy_curves(f'val_stego_methods_accuracy_{timestamp}.png')
     
     # 训练 SVM 分类器
     train_features = np.concatenate(train_features, axis=0)
