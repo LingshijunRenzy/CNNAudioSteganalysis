@@ -10,3 +10,6 @@ data/
 
 # Ignore all png images
 *.png
+
+# Ignore all training logs
+*.csv

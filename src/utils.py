@@ -251,3 +251,167 @@ class StegoMethodTracker:
                 self.method_stats[method]['total'] = 0
                 self.method_stats[method]['epoch_correct'] = 0
                 self.method_stats[method]['epoch_total'] = 0
+
+    @staticmethod
+    def plot_combined_accuracy_curves(train_tracker, val_tracker, save_path='combined_stego_methods_accuracy.png'):
+        """
+        将训练和验证的准确率曲线以及累积准确率图表合并到一个图中
+        
+        Args:
+            train_tracker: 训练集的StegoMethodTracker实例
+            val_tracker: 验证集的StegoMethodTracker实例
+            save_path: 保存路径
+        """
+        plt.figure(figsize=(16, 16))
+        
+        # 上半部分：训练和验证的准确率曲线
+        # 训练集曲线图 (左上)
+        plt.subplot(2, 2, 1)
+        
+        # 处理训练集曲线数据
+        train_cover_accs = [acc for acc in train_tracker.cover_stats['epoch_accs'] if acc is not None]
+        train_epochs = range(1, len(train_cover_accs) + 1)
+        
+        if train_cover_accs:
+            plt.plot(train_epochs, train_cover_accs, 'k-', linewidth=2, label='Cover (Train)')
+            
+            # 添加训练集累积准确率水平线
+            train_cum_acc = train_tracker.get_cumulative_accuracy()
+            if train_cum_acc is not None:
+                plt.axhline(y=train_cum_acc, color='k', linestyle='--', 
+                            label=f'Cover (Train Cumulative): {train_cum_acc:.2f}%')
+        
+        # 针对每种隐写方法绘制训练曲线
+        colors = plt.cm.tab20(np.linspace(0, 1, len(train_tracker.all_methods)))
+        for i, method in enumerate(sorted(train_tracker.all_methods)):
+            stats = train_tracker.method_stats[method]
+            method_accs = [acc for acc in stats['epoch_accs'] if acc is not None]
+            
+            if method_accs:
+                method_epochs = range(1, len(method_accs) + 1)
+                color = colors[i % len(colors)]
+                plt.plot(method_epochs, method_accs, color=color, linewidth=1.5, 
+                         label=f'{method} (Train)')
+                
+                # 添加累积准确率水平线
+                cum_acc = train_tracker.get_cumulative_accuracy(method)
+                if cum_acc is not None:
+                    plt.axhline(y=cum_acc, color=color, linestyle='--',
+                               label=f'{method} (Train Cumulative): {cum_acc:.2f}%')
+        
+        plt.title('Training Accuracy Curves by Method')
+        plt.xlabel('Epoch')
+        plt.ylabel('Accuracy (%)')
+        plt.legend(loc='center left', bbox_to_anchor=(1, 0.5), fontsize='small')
+        plt.grid(True)
+        
+        # 验证集曲线图 (右上)
+        plt.subplot(2, 2, 2)
+        
+        # 处理验证集曲线数据
+        val_cover_accs = [acc for acc in val_tracker.cover_stats['epoch_accs'] if acc is not None]
+        val_epochs = range(1, len(val_cover_accs) + 1)
+        
+        if val_cover_accs:
+            plt.plot(val_epochs, val_cover_accs, 'k-', linewidth=2, label='Cover (Val)')
+            
+            # 添加验证集累积准确率水平线
+            val_cum_acc = val_tracker.get_cumulative_accuracy()
+            if val_cum_acc is not None:
+                plt.axhline(y=val_cum_acc, color='k', linestyle='--', 
+                            label=f'Cover (Val Cumulative): {val_cum_acc:.2f}%')
+        
+        # 针对每种隐写方法绘制验证曲线
+        for i, method in enumerate(sorted(val_tracker.all_methods)):
+            stats = val_tracker.method_stats[method]
+            method_accs = [acc for acc in stats['epoch_accs'] if acc is not None]
+            
+            if method_accs:
+                method_epochs = range(1, len(method_accs) + 1)
+                color = colors[i % len(colors)]
+                plt.plot(method_epochs, method_accs, color=color, linewidth=1.5, 
+                         label=f'{method} (Val)')
+                
+                # 添加累积准确率水平线
+                cum_acc = val_tracker.get_cumulative_accuracy(method)
+                if cum_acc is not None:
+                    plt.axhline(y=cum_acc, color=color, linestyle='--',
+                               label=f'{method} (Val Cumulative): {cum_acc:.2f}%')
+        
+        plt.title('Validation Accuracy Curves by Method')
+        plt.xlabel('Epoch')
+        plt.ylabel('Accuracy (%)')
+        plt.legend(loc='center left', bbox_to_anchor=(1, 0.5), fontsize='small')
+        plt.grid(True)
+        
+        # 下半部分：累积准确率柱状图
+        # 训练集累积准确率 (左下)
+        plt.subplot(2, 2, 3)
+        
+        # 收集训练集各方法累积准确率
+        train_methods = ['Cover'] + sorted(list(train_tracker.all_methods))
+        train_accuracies = []
+        
+        # 获取训练集各方法累积准确率
+        for method in train_methods:
+            if method == 'Cover':
+                acc = train_tracker.get_cumulative_accuracy()
+            else:
+                acc = train_tracker.get_cumulative_accuracy(method)
+            
+            train_accuracies.append(acc if acc is not None else 0)
+        
+        # 创建训练集柱状图
+        train_bars = plt.bar(train_methods, train_accuracies, color='skyblue')
+        
+        # 添加训练集数值标签
+        for bar in train_bars:
+            height = bar.get_height()
+            if height > 0:
+                plt.text(bar.get_x() + bar.get_width()/2., height + 1,
+                        f'{height:.2f}%', ha='center', va='bottom', fontsize=8)
+        
+        plt.title('Training Cumulative Accuracy by Method')
+        plt.xlabel('Steganography Method')
+        plt.ylabel('Accuracy (%)')
+        plt.ylim(0, 105)
+        plt.xticks(rotation=45, ha='right', fontsize=8)
+        plt.grid(axis='y')
+        
+        # 验证集累积准确率 (右下)
+        plt.subplot(2, 2, 4)
+        
+        # 收集验证集各方法累积准确率
+        val_methods = ['Cover'] + sorted(list(val_tracker.all_methods))
+        val_accuracies = []
+        
+        # 获取验证集各方法累积准确率
+        for method in val_methods:
+            if method == 'Cover':
+                acc = val_tracker.get_cumulative_accuracy()
+            else:
+                acc = val_tracker.get_cumulative_accuracy(method)
+            
+            val_accuracies.append(acc if acc is not None else 0)
+        
+        # 创建验证集柱状图
+        val_bars = plt.bar(val_methods, val_accuracies, color='salmon')
+        
+        # 添加验证集数值标签
+        for bar in val_bars:
+            height = bar.get_height()
+            if height > 0:
+                plt.text(bar.get_x() + bar.get_width()/2., height + 1,
+                        f'{height:.2f}%', ha='center', va='bottom', fontsize=8)
+        
+        plt.title('Validation Cumulative Accuracy by Method')
+        plt.xlabel('Steganography Method')
+        plt.ylabel('Accuracy (%)')
+        plt.ylim(0, 105)
+        plt.xticks(rotation=45, ha='right', fontsize=8)
+        plt.grid(axis='y')
+        
+        # 保存整合图表
+        plt.tight_layout()
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"Combined accuracy curves for different steganography methods saved to {save_path}")

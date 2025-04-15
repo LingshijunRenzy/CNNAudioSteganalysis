@@ -56,7 +56,7 @@ class DPES(nn.Module):
         return enhanced_features
 
 class CNNStegAnalysis(nn.Module):
-    def __init__(self, input_channels=1):
+    def __init__(self, input_channels=1, dropout_rate=0.5):
         super(CNNStegAnalysis, self).__init__()
         
         # 初始卷积层
@@ -87,7 +87,7 @@ class CNNStegAnalysis(nn.Module):
         self.fc = nn.Sequential(
             nn.Linear(128, 64),
             nn.ReLU(),
-            nn.Dropout(0.5),
+            nn.Dropout(dropout_rate),
             nn.Linear(64, 2)
         )
     

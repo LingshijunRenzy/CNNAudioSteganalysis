@@ -24,6 +24,7 @@ class ConfigManager:
             'MODEL_CONFIG': MODEL_CONFIG,
             'TRAIN_CONFIG': TRAIN_CONFIG,
             'AUDIO_CONFIG': AUDIO_CONFIG,
+            'STORAGE_CONFIG': STORAGE_CONFIG,
         }
 
         if config_path and os.path.exists(config_path):
@@ -94,12 +95,23 @@ TRAIN_CONFIG = {
 
 # 音频处理相关配置
 AUDIO_CONFIG = {
-    'sample_rate': 16000,
+    'sample_rate': 32000,
     'duration': 2,  # 音频片段长度(秒)
     'frame_length': 512,
     'hop_percentage': 0.5,
     'target_bitrate': '512k',
     'target_profile': 'aac_he_v2'
+}
+
+STORAGE_CONFIG = {
+    'type': 'local',  # 默认为本地存储
+    'oss': {
+        'access_key_id': '',
+        'access_key_secret': '',
+        'endpoint': '',
+        'bucket_name': '',
+        'path_strip_prefix': ''
+    }
 }
 
 def load_config(config_path):
